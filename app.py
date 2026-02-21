@@ -26,7 +26,7 @@ def send_email_with_image(lat, lon, image_bytes, filename="pothole.jpg"):
     msg.add_attachment(image_bytes, maintype="image", subtype="jpeg", filename=filename)
 
     context = ssl.create_default_context()
-    with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context) as server:
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=10, context=context) as server:
         server.login(GMAIL_USER, GMAIL_APP_PASS)
         server.send_message(msg)
 
@@ -52,4 +52,5 @@ def report():
     image_bytes = image_file.read()
 
     send_email_with_image(lat, lon, image_bytes, filename=image_file.filename or "pothole.jpg")
+
     return jsonify({"ok": True})
