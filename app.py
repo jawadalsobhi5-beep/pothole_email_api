@@ -1,34 +1,44 @@
-import os, smtplib, ssl
+import os
+import base64
+import requests
 from flask import Flask, request, jsonify
-from email.message import EmailMessage
 
 app = Flask(__name__)
 
-GMAIL_USER = os.environ["GMAIL_USER"]
-GMAIL_APP_PASS = os.environ["GMAIL_APP_PASS"]
-TO_EMAIL = os.environ["TO_EMAIL"]
-API_KEY = os.environ["API_KEY"]  # خلّه مطلوب للحماية
+API_KEY = os.environ["API_KEY"]              # حماية endpoint
+RESEND_API_KEY = os.environ["RESEND_API_KEY"]
+RESEND_FROM = os.environ["RESEND_FROM"]      # مثل: "Pothole Bot <alerts@yourdomain.com>"
+TO_EMAIL = os.environ["TO_EMAIL"]            # ايميلك
+
+RESEND_URL = "https://api.resend.com/emails"
 
 def send_email_with_image(lat, lon, image_bytes, filename="pothole.jpg"):
     maps_link = f"https://maps.google.com/?q={lat},{lon}"
 
-    msg = EmailMessage()
-    msg["Subject"] = "⚠️ Pothole Detected"
-    msg["From"] = GMAIL_USER
-    msg["To"] = TO_EMAIL
+    attachment_b64 = base64.b64encode(image_bytes).decode("utf-8")
 
-    msg.set_content(
-        f"Pothole detected.\n\n"
-        f"Lat: {lat}\nLon: {lon}\n"
-        f"Google Maps: {maps_link}\n"
-    )
+    payload = {
+        "from": RESEND_FROM,
+        "to": [TO_EMAIL],
+        "subject": "⚠️ Pothole Detected",
+        "text": f"Pothole detected.\n\nLat: {lat}\nLon: {lon}\nGoogle Maps: {maps_link}\n",
+        "attachments": [
+            {
+                "filename": filename,
+                "content": attachment_b64
+            }
+        ],
+    }
 
-    msg.add_attachment(image_bytes, maintype="image", subtype="jpeg", filename=filename)
+    headers = {
+        "Authorization": f"Bearer {RESEND_API_KEY}",
+        "Content-Type": "application/json",
+    }
 
-    context = ssl.create_default_context()
-    with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=10, context=context) as server:
-        server.login(GMAIL_USER, GMAIL_APP_PASS)
-        server.send_message(msg)
+    r = requests.post(RESEND_URL, json=payload, headers=headers, timeout=15)
+    # لو صار خطأ، نخليه يطلع في Logs
+    r.raise_for_status()
+    return r.json()
 
 @app.get("/health")
 def health():
@@ -36,7 +46,6 @@ def health():
 
 @app.post("/report")
 def report():
-    # حماية
     if request.headers.get("X-API-KEY") != API_KEY:
         return jsonify({"ok": False, "error": "unauthorized"}), 401
 
@@ -51,6 +60,5 @@ def report():
     image_file = request.files["image"]
     image_bytes = image_file.read()
 
-    send_email_with_image(lat, lon, image_bytes, filename=image_file.filename or "pothole.jpg")
-
-    return jsonify({"ok": True})
+    data = send_email_with_image(lat, lon, image_bytes, filename=image_file.filename or "pothole.jpg")
+    return jsonify({"ok": True, "resend": data})
